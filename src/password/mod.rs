@@ -1,15 +1,98 @@
 pub mod password_strength;
+pub mod types;
 
+use crate::password::types::{
+    GeneratedPassword, LOWERCASE, NUMBERS, PasswordValidation, SPECIAL, UPPERCASE,
+};
 use rand::{Rng, prelude::SliceRandom};
 
-const UPPERCASE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const LOWERCASE: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
-const NUMBERS: &[u8] = b"0123456789";
-const SPECIAL: &[u8] = b"!@#$%^&*()-_=+[]{}|;:,.<>?";
+// Generate a password that meets the required minimum entropy
+pub fn generate_password_with_entropy(
+    mut length: usize,
+    use_uppercase: bool,
+    use_lowercase: bool,
+    use_numbers: bool,
+    use_special: bool,
+    min_entropy: f64,
+) -> GeneratedPassword {
+    let mut password = String::new();
+    let mut current_entropy = 0.0;
+    let mut reached_min_entropy = false;
 
-pub struct PasswordValidation {
-    pub is_valid: bool,
-    pub missing_types: Vec<String>,
+    // Try up to 10 times, increasing length if needed
+    for _ in 0..10 {
+        password = generate_secure_password(
+            length,
+            use_uppercase,
+            use_lowercase,
+            use_numbers,
+            use_special,
+        );
+        current_entropy = calc_entropy(&password);
+
+        if current_entropy >= min_entropy {
+            reached_min_entropy = true;
+            break;
+        }
+
+        length += 2;
+    }
+
+    let validation = validate_password(
+        &password,
+        use_uppercase,
+        use_lowercase,
+        use_numbers,
+        use_special,
+    );
+
+    GeneratedPassword {
+        password,
+        entropy: current_entropy,
+        validation,
+        original_min_entropy: min_entropy,
+        reached_min_entropy,
+    }
+}
+
+pub fn format_password_output(generated: &GeneratedPassword) -> Vec<String> {
+    let mut output = Vec::new();
+
+    output.push(format!("Generated password: {}", generated.password));
+    output.push(format!("Password length: {}", generated.password.len()));
+    output.push(format!("Estimated entropy: {:.2} bits", generated.entropy));
+
+    let strength = password_strength::PasswordStrength::from_entropy(generated.entropy);
+    output.push(format!("Password strength: {}", strength.description()));
+
+    output.push(format!(
+        "Validation: {}",
+        if generated.validation.is_valid {
+            "PASSED ✓"
+        } else {
+            "FAILED ✗"
+        }
+    ));
+
+    if !generated.validation.is_valid {
+        output.push(format!(
+            "Missing character types: {}",
+            generated.validation.missing_types.join(", ")
+        ));
+    }
+
+    if !generated.reached_min_entropy {
+        output.push(format!(
+            "Warning: Could not generate password with entropy of {:.2} bits.",
+            generated.original_min_entropy
+        ));
+        output.push(format!(
+            "Generated password with entropy of {:.2} bits instead.",
+            generated.entropy
+        ));
+    }
+
+    output
 }
 
 pub fn generate_secure_password(
